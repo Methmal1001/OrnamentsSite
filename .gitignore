@@ -1,0 +1,19 @@
+# Repository-wide ignores (frontend/ and backend/ have their own .gitignore files too)
+
+# Stray lockfile from running npm in the repository root (the app lives in frontend/)
+/package-lock.json
+/node_modules/
+
+# Secrets and local settings – never commit
+.env
+.env.*
+!.env.example
+appsettings.*.local.json
+*.user
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

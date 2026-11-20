@@ -1,0 +1,586 @@
+{
+  "info": {
+    "name": "Lanka Ornaments API – SQL Server verification",
+    "description": "End-to-end checks for every endpoint. Run with:\npostman collection run postman/LankaOrnaments.API.postman_collection.json --env-var baseUrl=http://localhost:5196 --env-var adminPassword=... --env-var customerPassword=...\n\nCreates one test customer (api-test-<timestamp>@example.lk) and removes the ornament/notifications it creates.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('runId')) {",
+          "  pm.collectionVariables.set('runId', Date.now().toString());",
+          "}",
+          "// Anti-CSRF header required on state-changing requests that don't use a bearer token.",
+          "pm.request.headers.upsert({ key: 'X-Requested-With', value: 'XMLHttpRequest' });"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "adminEmail", "value": "admin@lankaornaments.lk" },
+    { "key": "customerEmail", "value": "customer@lankaornaments.lk" }
+  ],
+  "item": [
+    {
+      "name": "01 Health check (database connectivity)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/health" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 and connected to LankaOrnamentsDB', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json().database).to.eql('LankaOrnamentsDB');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "02 List ornaments (anonymous)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/ornaments" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const list = pm.response.json();",
+        "pm.test('200 with seeded catalogue', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(list.length).to.be.at.least(16);",
+        "});",
+        "pm.test('frontend contract fields', () => {",
+        "  const o = list[0];",
+        "  ['id','sku','name','categoryId','description','price','availability','metal','weightGrams','gemstone','imageUrl','isFeatured','createdAt','stockQuantity','isAvailable'].forEach(k => pm.expect(o).to.have.property(k));",
+        "  pm.expect(o.id).to.be.a('string');",
+        "  pm.expect(o.createdAt).to.match(/Z$/);",
+        "});",
+        "pm.test('availability derived from stock', () => {",
+        "  const byName = Object.fromEntries(list.map(o => [o.sku, o]));",
+        "  pm.expect(byName['LO-NK-003'].availability).to.eql('out-of-stock');",
+        "  pm.expect(byName['LO-NK-001'].availability).to.eql('pre-order');",
+        "  pm.expect(byName['LO-RG-003'].availability).to.eql('low-stock');",
+        "  pm.expect(byName['LO-RG-001'].availability).to.eql('in-stock');",
+        "});",
+        "pm.collectionVariables.set('existingOrnamentId', list[0].id);"
+      ] } }]
+    },
+    {
+      "name": "03 Get ornament by id",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/ornaments/{{existingOrnamentId}}" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 and same id', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('existingOrnamentId'));",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "04 Get missing ornament → 404 ProblemDetails",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/ornaments/999999" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('404 problem', () => {",
+        "  pm.response.to.have.status(404);",
+        "  pm.expect(pm.response.json().title).to.eql('Ornament not found');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "05 Create ornament without token → 401",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/ornaments",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('401', () => pm.response.to.have.status(401));"
+      ] } }]
+    },
+    {
+      "name": "06 Login – wrong password → 401",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{ \"email\": \"{{customerEmail}}\", \"password\": \"Wrong-Password1\", \"rememberMe\": false }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('401 invalid credentials', () => {",
+        "  pm.response.to.have.status(401);",
+        "  pm.expect(pm.response.json().title).to.eql('Invalid email or password');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "07 Login – seeded customer",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{ \"email\": \"{{customerEmail}}\", \"password\": \"{{customerPassword}}\", \"rememberMe\": true }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const s = pm.response.json();",
+        "pm.test('200 with session', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(s.token).to.be.a('string');",
+        "  pm.expect(s.user.role).to.eql('customer');",
+        "  pm.expect(s.user.phone).to.eql('0771234567');",
+        "});",
+        "pm.collectionVariables.set('customerToken', s.token);"
+      ] } }]
+    },
+    {
+      "name": "08 Customer creates ornament → 403",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/ornaments",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{customerToken}}" }],
+        "body": { "mode": "raw", "raw": "{}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('403', () => pm.response.to.have.status(403));"
+      ] } }]
+    },
+    {
+      "name": "09 Customer calls admin endpoint → 403",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/customers", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('403', () => pm.response.to.have.status(403));"
+      ] } }]
+    },
+    {
+      "name": "10 Login – seeded admin",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{ \"email\": \"{{adminEmail}}\", \"password\": \"{{adminPassword}}\", \"rememberMe\": false }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const s = pm.response.json();",
+        "pm.test('200 admin session', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(s.user.role).to.eql('admin');",
+        "});",
+        "pm.collectionVariables.set('adminToken', s.token);"
+      ] } }]
+    },
+    {
+      "name": "11 Admin creates ornament (INSERT)",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/ornaments",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{\n  \"sku\": \"lo-test-{{runId}}\",\n  \"name\": \"API Test Moonstone Ring\",\n  \"categoryId\": \"gold-rings\",\n  \"description\": \"Created by the Postman verification run.\",\n  \"price\": 99000,\n  \"availability\": \"low-stock\",\n  \"metal\": \"18K Yellow Gold\",\n  \"weightGrams\": 3.5,\n  \"gemstone\": \"Moonstone\",\n  \"imageUrl\": null,\n  \"isFeatured\": false\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const o = pm.response.json();",
+        "pm.test('201 created with Location', () => {",
+        "  pm.response.to.have.status(201);",
+        "  pm.response.to.have.header('Location');",
+        "});",
+        "pm.test('SKU normalised, availability round-trips', () => {",
+        "  pm.expect(o.sku).to.eql(('LO-TEST-' + pm.collectionVariables.get('runId')).toUpperCase());",
+        "  pm.expect(o.availability).to.eql('low-stock');",
+        "  pm.expect(o.stockQuantity).to.eql(3);",
+        "});",
+        "pm.collectionVariables.set('ornamentId', o.id);"
+      ] } }]
+    },
+    {
+      "name": "12 Duplicate SKU → 409",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/ornaments",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{\n  \"sku\": \"LO-TEST-{{runId}}\",\n  \"name\": \"Duplicate\",\n  \"categoryId\": \"pendants\",\n  \"description\": \"Should be rejected as a duplicate SKU.\",\n  \"price\": 1000,\n  \"availability\": \"in-stock\",\n  \"metal\": \"18K Yellow Gold\",\n  \"weightGrams\": 1,\n  \"isFeatured\": false\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('409 conflict', () => pm.response.to.have.status(409));"
+      ] } }]
+    },
+    {
+      "name": "13 Invalid ornament → 400 validation errors",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/ornaments",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"sku\": \"X\", \"name\": \"\", \"categoryId\": \"watches\", \"description\": \"short\", \"price\": 0, \"availability\": \"maybe\", \"metal\": \"\", \"weightGrams\": 0 }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const p = pm.response.json();",
+        "pm.test('400 with field errors', () => {",
+        "  pm.response.to.have.status(400);",
+        "  ['CategoryId','Price','Availability','Name'].forEach(f => pm.expect(p.errors).to.have.property(f));",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "14 Admin updates ornament (UPDATE)",
+      "request": {
+        "method": "PUT", "url": "{{baseUrl}}/api/ornaments/{{ornamentId}}",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{\n  \"sku\": \"LO-TEST-{{runId}}\",\n  \"name\": \"API Test Moonstone Ring (edited)\",\n  \"categoryId\": \"gold-rings\",\n  \"description\": \"Updated by the Postman verification run.\",\n  \"price\": 105000,\n  \"availability\": \"out-of-stock\",\n  \"metal\": \"18K Rose Gold\",\n  \"weightGrams\": 3.6,\n  \"gemstone\": \"Moonstone\",\n  \"imageUrl\": \"https://example.com/ring.jpg\",\n  \"isFeatured\": true\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const o = pm.response.json();",
+        "pm.test('200 with new values', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(o.name).to.eql('API Test Moonstone Ring (edited)');",
+        "  pm.expect(o.price).to.eql(105000);",
+        "  pm.expect(o.availability).to.eql('out-of-stock');",
+        "  pm.expect(o.isAvailable).to.eql(false);",
+        "  pm.expect(new Date(o.updatedAt) >= new Date(o.createdAt)).to.be.true;",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "15 Read updated ornament (SELECT)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/ornaments/{{ornamentId}}" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('persisted in SQL Server', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json().metal).to.eql('18K Rose Gold');",
+        "  pm.expect(pm.response.json().imageUrl).to.eql('https://example.com/ring.jpg');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "16 Register new customer",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"API Test Customer\",\n  \"email\": \"api-test-{{runId}}@example.lk\",\n  \"phone\": \"071 222 3333\",\n  \"password\": \"Initial@2026\",\n  \"address\": \"7 Lake Road, Kurunegala\"\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const s = pm.response.json();",
+        "pm.test('200 customer session, phone normalised', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(s.user.role).to.eql('customer');",
+        "  pm.expect(s.user.phone).to.eql('0712223333');",
+        "});",
+        "pm.collectionVariables.set('newToken', s.token);",
+        "pm.collectionVariables.set('newUserId', s.user.id);"
+      ] } }]
+    },
+    {
+      "name": "17 Register duplicate email → 409",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Duplicate\",\n  \"email\": \"API-TEST-{{runId}}@example.lk\",\n  \"phone\": \"0712223333\",\n  \"password\": \"Initial@2026\",\n  \"address\": \"7 Lake Road, Kurunegala\"\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('409 (case-insensitive unique email)', () => pm.response.to.have.status(409));"
+      ] } }]
+    },
+    {
+      "name": "18 Register weak password → 400",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/register",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"Weak Password\",\n  \"email\": \"weak-{{runId}}@example.lk\",\n  \"phone\": \"0712223333\",\n  \"password\": \"alllowercase\",\n  \"address\": \"7 Lake Road, Kurunegala\"\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('400 password rules', () => {",
+        "  pm.response.to.have.status(400);",
+        "  pm.expect(pm.response.json().errors).to.have.property('password');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "19 GET /profile/me",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/profile/me", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 own profile', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json().address).to.eql('7 Lake Road, Kurunegala');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "20 PUT /profile/me (update profile)",
+      "request": {
+        "method": "PUT", "url": "{{baseUrl}}/api/profile/me",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{newToken}}" }],
+        "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"API Test Customer Updated\",\n  \"email\": \"api-test-{{runId}}-new@example.lk\",\n  \"phone\": \"+94 77 999 8888\",\n  \"address\": \"9 Hill Street, Kandy\"\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const u = pm.response.json();",
+        "pm.test('200 profile + user updated', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(u.fullName).to.eql('API Test Customer Updated');",
+        "  pm.expect(u.email).to.eql('api-test-' + pm.collectionVariables.get('runId') + '-new@example.lk');",
+        "  pm.expect(u.phone).to.eql('+94779998888');",
+        "  pm.expect(u.address).to.eql('9 Hill Street, Kandy');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "20b Old token revoked after email change → re-login",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{ \"email\": \"api-test-{{runId}}-new@example.lk\", \"password\": \"Initial@2026\", \"rememberMe\": false }" }
+      },
+      "event": [
+        { "listen": "prerequest", "script": { "exec": [
+          "pm.sendRequest({ url: pm.variables.replaceIn('{{baseUrl}}/api/profile/me'), method: 'GET', header: { Authorization: 'Bearer ' + pm.collectionVariables.get('newToken') } }, (err, res) => {",
+          "  pm.collectionVariables.set('revokedStatus', res.code);",
+          "});"
+        ] } },
+        { "listen": "test", "script": { "exec": [
+          "pm.test('previous token rejected (security stamp changed)', () => pm.expect(pm.collectionVariables.get('revokedStatus')).to.eql(401));",
+          "pm.test('login with new email', () => pm.response.to.have.status(200));",
+          "pm.collectionVariables.set('newToken', pm.response.json().token);"
+        ] } }
+      ]
+    },
+    {
+      "name": "21 PUT /profile/me with another user's email → 409",
+      "request": {
+        "method": "PUT", "url": "{{baseUrl}}/api/profile/me",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{newToken}}" }],
+        "body": { "mode": "raw", "raw": "{\n  \"fullName\": \"API Test Customer Updated\",\n  \"email\": \"{{customerEmail}}\",\n  \"phone\": \"0779998888\",\n  \"address\": \"9 Hill Street, Kandy\"\n}" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('409', () => pm.response.to.have.status(409));"
+      ] } }]
+    },
+    {
+      "name": "22 Change password – wrong current → 400",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/profile/me/change-password",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{newToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"currentPassword\": \"Wrong@2026\", \"newPassword\": \"Changed@2026\" }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('400 currentPassword error', () => {",
+        "  pm.response.to.have.status(400);",
+        "  pm.expect(pm.response.json().errors.currentPassword[0]).to.eql('Current password is incorrect');",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "23 Change password → 204",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/profile/me/change-password",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{newToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"currentPassword\": \"Initial@2026\", \"newPassword\": \"Changed@2026\" }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "24 Login with changed password and new email",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{ \"email\": \"api-test-{{runId}}-new@example.lk\", \"password\": \"Changed@2026\", \"rememberMe\": false }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "pm.collectionVariables.set('newToken', pm.response.json().token);"
+      ] } }]
+    },
+    {
+      "name": "25 GET notification preferences",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/profile/me/notification-preferences", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 defaults on', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json()).to.include({ emailNotificationsEnabled: true, inAppNotificationsEnabled: true });",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "26 Disable in-app notifications",
+      "request": {
+        "method": "PUT", "url": "{{baseUrl}}/api/profile/me/notification-preferences",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{newToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"emailNotificationsEnabled\": false, \"inAppNotificationsEnabled\": false }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 saved', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(pm.response.json()).to.include({ emailNotificationsEnabled: false, inAppNotificationsEnabled: false });",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "27 Admin lists customers",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/customers", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const list = pm.response.json();",
+        "pm.test('200, includes new customer, excludes admin', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(list.some(c => c.id === pm.collectionVariables.get('newUserId'))).to.be.true;",
+        "  pm.expect(list.every(c => c.role === 'customer')).to.be.true;",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "28 Promotion to opted-out customer → 400",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/admin/notifications",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"recipient\": \"{{newUserId}}\", \"title\": \"Private offer\", \"message\": \"A special offer just for you.\", \"type\": \"promotion\" }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('400 preference respected', () => pm.response.to.have.status(400));"
+      ] } }]
+    },
+    {
+      "name": "29 Re-enable in-app notifications",
+      "request": {
+        "method": "PUT", "url": "{{baseUrl}}/api/profile/me/notification-preferences",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{newToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"emailNotificationsEnabled\": true, \"inAppNotificationsEnabled\": true }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));"
+      ] } }]
+    },
+    {
+      "name": "30 Admin sends personal notification",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/admin/notifications",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"recipient\": \"{{newUserId}}\", \"title\": \"Your reservation\", \"message\": \"Your reserved ring is ready for viewing.\", \"type\": \"order\" }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const n = pm.response.json()[0];",
+        "pm.test('200 personal notification', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(n.userId).to.eql(pm.collectionVariables.get('newUserId'));",
+        "  pm.expect(n.isShopWide).to.be.false;",
+        "});",
+        "pm.collectionVariables.set('personalId', n.id);"
+      ] } }]
+    },
+    {
+      "name": "31 Admin sends shop-wide announcement (UserId NULL)",
+      "request": {
+        "method": "POST", "url": "{{baseUrl}}/api/admin/notifications",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+        "body": { "mode": "raw", "raw": "{ \"recipient\": \"all\", \"title\": \"API test announcement {{runId}}\", \"message\": \"Shop-wide announcement created by the verification run.\", \"type\": \"system\" }" }
+      },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const n = pm.response.json()[0];",
+        "pm.test('200 shop-wide', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(n.userId).to.eql(null);",
+        "  pm.expect(n.isShopWide).to.be.true;",
+        "});",
+        "pm.collectionVariables.set('shopWideId', n.id);"
+      ] } }]
+    },
+    {
+      "name": "32 Customer sees personal + shop-wide (unread)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/notifications", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const list = pm.response.json();",
+        "const p = list.find(n => n.id === pm.collectionVariables.get('personalId'));",
+        "const s = list.find(n => n.id === pm.collectionVariables.get('shopWideId'));",
+        "pm.test('both present and unread', () => {",
+        "  pm.expect(p).to.be.an('object'); pm.expect(s).to.be.an('object');",
+        "  pm.expect(p.isRead).to.be.false; pm.expect(s.isRead).to.be.false;",
+        "});",
+        "pm.test('newest first', () => pm.expect(list[0].id).to.eql(pm.collectionVariables.get('shopWideId')));"
+      ] } }]
+    },
+    {
+      "name": "33 Mark personal notification as read",
+      "request": { "method": "PUT", "url": "{{baseUrl}}/api/notifications/{{personalId}}/read", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "34 Mark all as read",
+      "request": { "method": "PUT", "url": "{{baseUrl}}/api/notifications/read-all", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "35 All read for this customer",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/notifications", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('no unread left', () => pm.expect(pm.response.json().filter(n => !n.isRead).length).to.eql(0));"
+      ] } }]
+    },
+    {
+      "name": "36 Seeded customer still has the announcement unread",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/notifications", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const s = pm.response.json().find(n => n.id === pm.collectionVariables.get('shopWideId'));",
+        "pm.test('read state is per customer', () => {",
+        "  pm.expect(s).to.be.an('object');",
+        "  pm.expect(s.isRead).to.be.false;",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "37 Customer cannot read another user's notification → 404",
+      "request": { "method": "PUT", "url": "{{baseUrl}}/api/notifications/{{personalId}}/read", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('404', () => pm.response.to.have.status(404));"
+      ] } }]
+    },
+    {
+      "name": "38 Customer dismisses announcement",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/api/notifications/{{shopWideId}}", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "39 Customer deletes personal notification",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/api/notifications/{{personalId}}", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "40 Both gone for this customer",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/notifications", "header": [{ "key": "Authorization", "value": "Bearer {{newToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const ids = pm.response.json().map(n => n.id);",
+        "pm.test('dismissed + deleted', () => {",
+        "  pm.expect(ids).to.not.include(pm.collectionVariables.get('personalId'));",
+        "  pm.expect(ids).to.not.include(pm.collectionVariables.get('shopWideId'));",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "41 Admin lists all notifications",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/admin/notifications", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "const list = pm.response.json();",
+        "pm.test('announcement still exists, personal one deleted', () => {",
+        "  pm.response.to.have.status(200);",
+        "  pm.expect(list.some(n => n.id === pm.collectionVariables.get('shopWideId'))).to.be.true;",
+        "  pm.expect(list.some(n => n.id === pm.collectionVariables.get('personalId'))).to.be.false;",
+        "});"
+      ] } }]
+    },
+    {
+      "name": "42 Admin deletes announcement (DELETE + cascade receipts)",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/api/notifications/{{shopWideId}}", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "43 Admin deletes ornament (DELETE)",
+      "request": { "method": "DELETE", "url": "{{baseUrl}}/api/ornaments/{{ornamentId}}", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('204', () => pm.response.to.have.status(204));"
+      ] } }]
+    },
+    {
+      "name": "44 Deleted ornament → 404",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/ornaments/{{ornamentId}}" },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('404', () => pm.response.to.have.status(404));"
+      ] } }]
+    },
+    {
+      "name": "45 Invalid token → 401",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/profile/me", "header": [{ "key": "Authorization", "value": "Bearer not-a-real-token" }] },
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('401', () => pm.response.to.have.status(401));"
+      ] } }]
+    }
+  ]
+}

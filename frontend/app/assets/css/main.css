@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Jost", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", ui-serif, Georgia, serif;
+
+  /* Champagne gold */
+  --color-gold-50: #fbf8f1;
+  --color-gold-100: #f5eedc;
+  --color-gold-200: #ebdcb8;
+  --color-gold-300: #dfc58e;
+  --color-gold-400: #d1ab68;
+  --color-gold-500: #c39a52;
+  --color-gold-600: #a87f3e;
+  --color-gold-700: #8a6534;
+  --color-gold-800: #6f512f;
+  --color-gold-900: #5b4329;
+
+  /* Ivory / cream / warm beige */
+  --color-ivory: #fffdf7;
+  --color-cream: #f8f3e8;
+  --color-beige: #f3ebdd;
+
+  /* Charcoal text */
+  --color-charcoal: #2b2a28;
+  --color-charcoal-soft: #5a5652;
+
+  --shadow-soft: 0 2px 12px -2px rgb(91 67 41 / 0.08), 0 1px 3px rgb(91 67 41 / 0.05);
+  --shadow-lift: 0 18px 40px -12px rgb(91 67 41 / 0.22);
+
+  --animate-fade-up: fade-up 0.5s ease-out both;
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-ivory font-sans text-charcoal antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-serif tracking-tight;
+  }
+  ::selection {
+    @apply bg-gold-200 text-charcoal;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .btn {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-full px-6 py-2.5 text-sm font-medium tracking-wide transition-all duration-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold-500 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply bg-linear-to-r from-gold-500 to-gold-600 text-white shadow-soft hover:-translate-y-0.5 hover:from-gold-600 hover:to-gold-700 hover:shadow-lift;
+  }
+  .btn-outline {
+    @apply border border-gold-400 text-gold-700 hover:bg-gold-50 hover:border-gold-500;
+  }
+  .btn-ghost {
+    @apply text-charcoal-soft hover:bg-gold-50 hover:text-gold-700;
+  }
+  .btn-danger {
+    @apply bg-rose-600 text-white hover:bg-rose-700;
+  }
+  .btn-sm {
+    @apply px-4 py-1.5 text-xs;
+  }
+
+  .card {
+    @apply rounded-2xl border border-gold-100 bg-white shadow-soft;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-gold-200 bg-white px-4 py-2.5 text-sm text-charcoal placeholder:text-charcoal-soft/50 transition focus:border-gold-500 focus:outline-none focus:ring-4 focus:ring-gold-100;
+  }
+  .input-error {
+    @apply border-rose-400 focus:border-rose-500 focus:ring-rose-100;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-charcoal;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .eyebrow {
+    @apply text-xs font-medium uppercase tracking-[0.25em] text-gold-600;
+  }
+  .section-title {
+    @apply font-serif text-3xl font-semibold text-charcoal sm:text-4xl;
+  }
+}

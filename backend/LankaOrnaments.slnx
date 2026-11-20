@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LankaOrnaments.API/LankaOrnaments.API.csproj" />
+    <Project Path="src/LankaOrnaments.Core/LankaOrnaments.Core.csproj" />
+    <Project Path="src/LankaOrnaments.Infrastructure/LankaOrnaments.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LankaOrnaments.Tests/LankaOrnaments.Tests.csproj" />
+  </Folder>
+</Solution>
